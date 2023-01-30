@@ -10,7 +10,10 @@ import urllib.parse
 from pathlib import Path
 from urllib import request
 
+from helpers import run_once_per
+
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
+
 
 def get_args():
     parser = argparse.ArgumentParser(prog="Github downloader")
@@ -19,19 +22,9 @@ def get_args():
     return parser.parse_args()
 
 
-def get_and_filter_github_releases(repo: str, release_type: str):
-    # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
-    # всегда по убыванию, т.е. как на странице релизов
-
-    params = {
-        "per_page": "50"
-    }
-    encoded_params = urllib.parse.urlencode(params)
-
-    url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
-    print(f"Requesting github releases for {repo}")
-    print(f"URL: {url}")
-
+@run_once_per(seconds=2)
+def get(url):
+    print(f"GET: {url}")
     req = request.Request(
         url=url,
         data=None,
@@ -44,6 +37,27 @@ def get_and_filter_github_releases(repo: str, release_type: str):
     with request.urlopen(req, timeout=3, ) as response:
         print(response.getcode())
         content = response.read().decode("utf-8")
+    return content
+
+
+def get_latest(repo: str):
+    print(f"Requesting latest release for {repo}")
+    url = f"{GITHUB_API_BASE_URL}/{repo}/releases/latest"
+    return json.loads(get(url))
+
+
+def get_releases(repo: str, release_type: str):
+    # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
+    # всегда по убыванию, т.е. как на странице релизов
+
+    params = {
+        "per_page": "50"
+    }
+    encoded_params = urllib.parse.urlencode(params)
+
+    url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
+    print(f"Requesting github releases for {repo}")
+    content = get(url)
 
     js = json.loads(content)
 
@@ -97,31 +111,40 @@ def download(release_info: dict, home: str, repo: str):
     with open(os.path.join(release_path, "README.md"), "w") as f:
         content = inspect.cleandoc(
             f"""
-# {release_info['name']}
-        
-Github Release link: {release_info['html_url']}
-
-created_at = {release_info['created_at']}
-
-published_at = {release_info['published_at']}
-
-# Release notes
-
-{release_info["body"]}
+                # {release_info['name']}
+                        
+                Github Release link: {release_info['html_url']}
+                
+                created_at = {release_info['created_at']}
+                
+                published_at = {release_info['published_at']}
+                
+                # Release notes
         """
         )
         f.write(content)
+        f.write('\n\n')
+        f.write(release_info["body"])
 
 
 def drop(home: str, repo: str, version: str):
     release_path = os.path.join(home, repo, version)
     shutil.rmtree(release_path)
 
+
 def run(home: str, repo: str, n_releases: int, release_type: str):
-    github_releases = get_and_filter_github_releases(repo=repo, release_type=release_type)
+    github_releases = get_releases(repo=repo, release_type=release_type)
     releases_to_keep = github_releases[:n_releases]
 
-    # someone likes to put '/' in tags
+    # always keep one tagged with `latest`
+    latest = get_latest(repo)
+    if not any(map(lambda r: r["tag_name"] == latest["tag_name"], releases_to_keep)):
+        print(f"Also keeping latest release {latest['tag_name']}")
+        releases_to_keep = [latest] + releases_to_keep
+
+    n_releases = len(releases_to_keep)
+
+    # for '/' in tag
     for release in releases_to_keep:
         release["tag_name"] = release["tag_name"].replace('/', '_')
 
@@ -150,8 +173,6 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
         if release['tag_name'] in versions_to_download
     ]
 
-    print(f"Releases to download: {releases_to_download}")
-
     for i, new in enumerate(releases_to_download):
         print(f"Downloading release {i + 1}/{len(releases_to_download)}. {repo}:{new['tag_name']}")
         download(release_info=new, home=home, repo=repo)
@@ -159,6 +180,8 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
     for version in versions_to_delete:
         print(f"Removing {repo}: {version}")
         drop(home=home, repo=repo, version=version)
+
+    print("Done")
 
 
 def main():
@@ -171,15 +194,18 @@ def main():
         for line in lines
     ]
 
-    for repo, n_releases, release_type in conf:
+    for i, (repo, n_releases, release_type) in enumerate(conf):
         run(
             home=args.home,
             repo=repo.strip('/'),
             n_releases=int(n_releases),
             release_type=release_type
         )
-        print(f"Sleeping for 10 seconds")
-        time.sleep(10)
+
+        if i != len(conf) - 1:
+            print(f"Sleeping for 5 seconds")
+            time.sleep(5)
+
 
 if __name__ == '__main__':
     main()
