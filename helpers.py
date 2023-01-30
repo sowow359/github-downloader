@@ -22,3 +22,9 @@ def run_once_per(seconds):
         return wrapper
 
     return decorator
+
+
+def reporthook(block_num, block_size, total_size):
+    downloaded = block_num * block_size
+    if downloaded < total_size:
+        print(int(downloaded / total_size * 100), '%', end="\r", sep='')

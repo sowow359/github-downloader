@@ -7,12 +7,14 @@ import os
 import shutil
 import time
 import urllib.parse
+from collections import OrderedDict
 from pathlib import Path
 from urllib import request
 
-from helpers import run_once_per
+from helpers import run_once_per, reporthook
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
+
 
 
 def get_args():
@@ -43,10 +45,12 @@ def get(url):
 def get_latest(repo: str):
     print(f"Requesting latest release for {repo}")
     url = f"{GITHUB_API_BASE_URL}/{repo}/releases/latest"
-    return json.loads(get(url))
+    js = json.loads(get(url))
+    js["tag_name"] = js["tag_name"].replace('/', '_')
+    return js
 
 
-def get_releases(repo: str, release_type: str):
+def get_releases(repo: str, release_type: str) -> dict:
     # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
     # всегда по убыванию, т.е. как на странице релизов
 
@@ -59,16 +63,24 @@ def get_releases(repo: str, release_type: str):
     print(f"Requesting github releases for {repo}")
     content = get(url)
 
-    js = json.loads(content)
+    all_releases = OrderedDict(
+        (release["tag_name"].replace('/', '_'), release)  # for '/' in tag
+        for release
+        in json.loads(content)
+    )
 
-    if release_type == "stable":
-        return [
-            item
-            for item in js
-            if not item["prerelease"]
-        ]
-    else:
-        return js
+    for release in all_releases.values():
+        release["tag_name"] = release["tag_name"].replace('/', '_')
+
+    return (
+        all_releases
+        if release_type == "all"
+        else OrderedDict(
+            (k, v)
+            for k, v in all_releases.items()
+            if not v["prerelease"]
+        )
+    )
 
 
 def get_local_versions(home: str, repo: str):
@@ -97,15 +109,15 @@ def download(release_info: dict, home: str, repo: str):
         filepath = os.path.join(release_path, asset_name)
         print(f"Downloading {asset['name']} to {filepath}")
 
-        request.urlretrieve(url, filepath)
+        request.urlretrieve(url, filepath, reporthook)
 
     tarball_path = os.path.join(release_path, "source.tar.gz")
     print(f"Downloading source tarball to {tarball_path}")
-    request.urlretrieve(release_info["tarball_url"], tarball_path)
+    request.urlretrieve(release_info["tarball_url"], tarball_path, reporthook)
 
     zipball_path = os.path.join(release_path, "source.zip")
     print(f"Downloading source zipball to {zipball_path}")
-    request.urlretrieve(release_info["zipball_url"], zipball_path)
+    request.urlretrieve(release_info["zipball_url"], zipball_path, reporthook)
 
     print(f"Creating release README.md file")
     with open(os.path.join(release_path, "README.md"), "w") as f:
@@ -134,48 +146,39 @@ def drop(home: str, repo: str, version: str):
 
 def run(home: str, repo: str, n_releases: int, release_type: str):
     github_releases = get_releases(repo=repo, release_type=release_type)
-    releases_to_keep = github_releases[:n_releases]
+    while len(github_releases) > n_releases:
+        github_releases.popitem()
+    releases_to_keep = github_releases
 
     # always keep one tagged with `latest`
     latest = get_latest(repo)
-    if not any(map(lambda r: r["tag_name"] == latest["tag_name"], releases_to_keep)):
-        print(f"Also keeping latest release {latest['tag_name']}")
-        releases_to_keep = [latest] + releases_to_keep
+    if latest["tag_name"] not in releases_to_keep:
+        print(f"Keeping latest release {latest['tag_name']}")
+        releases_to_keep[latest["tag_name"]] = latest
 
     n_releases = len(releases_to_keep)
 
-    # for '/' in tag
-    for release in releases_to_keep:
-        release["tag_name"] = release["tag_name"].replace('/', '_')
-
     local_versions = set(get_local_versions(home=home, repo=repo))
-
     if not local_versions:
         # no local versions, just download last `n_releases` releases from github
         print("No local releases found")
         print(f"{n_releases} will be downloaded")
-        for i, new in enumerate(releases_to_keep[:n_releases]):
+        for i, new in enumerate(releases_to_keep.values()):
             print(f"Processing release {i + 1}/{n_releases}. {repo}:{new['tag_name']}")
             download(release_info=new, home=home, repo=repo)
         print("Done")
         return
 
-    versions_to_keep = {
-        item["tag_name"]
-        for item in releases_to_keep
-    }
-    versions_to_download = versions_to_keep - local_versions
-    versions_to_delete = local_versions - versions_to_keep
+    versions_to_download = releases_to_keep.keys() - local_versions
+    print(f"About to download: {versions_to_download}")
 
-    releases_to_download = [
-        release
-        for release in releases_to_keep
-        if release['tag_name'] in versions_to_download
-    ]
+    versions_to_delete = local_versions - releases_to_keep.keys()
+    print(f"Will be deleted: {versions_to_delete}")
 
-    for i, new in enumerate(releases_to_download):
-        print(f"Downloading release {i + 1}/{len(releases_to_download)}. {repo}:{new['tag_name']}")
-        download(release_info=new, home=home, repo=repo)
+    for i, version in enumerate(versions_to_download):
+        release = releases_to_keep[version]
+        print(f"Downloading release {i + 1}/{len(versions_to_download)}. {repo}:{release['tag_name']}")
+        download(release_info=release, home=home, repo=repo)
 
     for version in versions_to_delete:
         print(f"Removing {repo}: {version}")
