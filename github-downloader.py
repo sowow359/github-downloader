@@ -4,13 +4,13 @@ import argparse
 import inspect
 import json
 import os
+import re
 import shutil
 import time
 import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 from urllib import request
-import re
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
 
@@ -91,13 +91,15 @@ def get_releases(repo: str, release_type: str) -> dict:
     print(f"Requesting github releases for {repo}")
     content = get(url)
 
-    all_releases = OrderedDict(
-        (release["tag_name"].replace('/', '_'), release)
-        for release in json.loads(content)  # for '/' in tag
-    )
+    all_releases = OrderedDict()
 
-    for release in all_releases.values():
+    # always keep one tagged with `latest`
+    latest = get_latest(repo)
+    all_releases[latest["tag_name"]] = latest
+
+    for release in json.loads(content):
         release["tag_name"] = release["tag_name"].replace('/', '_')
+        all_releases[release["tag_name"]] = release
 
     return (
         all_releases
@@ -176,12 +178,6 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
     while len(github_releases) > n_releases:
         github_releases.popitem()
     releases_to_keep = github_releases
-
-    # always keep one tagged with `latest`
-    latest = get_latest(repo)
-    if latest["tag_name"] not in releases_to_keep:
-        print(f"Keeping latest release {latest['tag_name']}")
-        releases_to_keep[latest["tag_name"]] = latest
 
     n_releases = len(releases_to_keep)
 
