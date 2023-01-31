@@ -222,10 +222,15 @@ def main():
 
     for i, (repo, n_releases, release_type) in enumerate(conf):
         assert release_type in ["all", "stable"], f"Unknown release type `{release_type}` given. Use `all` or `stable`"
+
+        n_releases = int(n_releases)
+        assert n_releases > 0, \
+               f"Incorrect number of releases for repo {repo}, number should be positive, `{n_releases}` given"
+
         run(
             home=args.home,
             repo=repo.strip('/'),
-            n_releases=int(n_releases),
+            n_releases=n_releases,
             release_type=release_type
         )
 

@@ -1,6 +1,7 @@
 # Github downloader
 
-Tool for stashing locally last N releases from your favorite repos. Also ensures you have latest release locally.
+Tool for stashing locally last N releases from your favorite repos. 
+Release marked as `latest` has top priority, will be downloaded first. Other N-1 releases are selected by publish date.
 
 No need for github token.
 
