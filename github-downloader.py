@@ -16,7 +16,6 @@ from helpers import run_once_per, reporthook
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
 
 
-
 def get_args():
     parser = argparse.ArgumentParser(prog="Github downloader")
     parser.add_argument("--home-folder", action="store", type=str, required=True, dest="home")
@@ -36,7 +35,10 @@ def get(url):
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with request.urlopen(req, timeout=3, ) as response:
+    with request.urlopen(
+        req,
+        timeout=3,
+    ) as response:
         print(response.getcode())
         content = response.read().decode("utf-8")
     return content
@@ -54,9 +56,7 @@ def get_releases(repo: str, release_type: str) -> dict:
     # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
     # всегда по убыванию, т.е. как на странице релизов
 
-    params = {
-        "per_page": "50"
-    }
+    params = {"per_page": "50"}
     encoded_params = urllib.parse.urlencode(params)
 
     url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
@@ -64,9 +64,8 @@ def get_releases(repo: str, release_type: str) -> dict:
     content = get(url)
 
     all_releases = OrderedDict(
-        (release["tag_name"].replace('/', '_'), release)  # for '/' in tag
-        for release
-        in json.loads(content)
+        (release["tag_name"].replace('/', '_'), release)
+        for release in json.loads(content)  # for '/' in tag
     )
 
     for release in all_releases.values():
@@ -198,6 +197,7 @@ def main():
     ]
 
     for i, (repo, n_releases, release_type) in enumerate(conf):
+        assert release_type in ["all", "stable"], f"Unknown release type `{release_type}` given. Use `all` or `stable`"
         run(
             home=args.home,
             repo=repo.strip('/'),
