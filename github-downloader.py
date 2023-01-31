@@ -47,7 +47,7 @@ def reporthook(block_num, block_size, total_size):
 def get_args():
     parser = argparse.ArgumentParser(prog="Github downloader")
     parser.add_argument("--home-folder", action="store", type=str, required=True, dest="home")
-    parser.add_argument("--config", action="store", type=str, required=False, dest="config_file_path")
+    parser.add_argument("--config", action="store", type=str, required=True, dest="config_file_path")
     return parser.parse_args()
 
 
