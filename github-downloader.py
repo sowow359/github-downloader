@@ -7,10 +7,10 @@ import os
 import re
 import shutil
 import time
-import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
-from urllib import request
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen, urlretrieve
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
 
@@ -20,7 +20,7 @@ def run_once_per(seconds):
     Allows function to run again only after specified number of seconds.
     """
 
-    last_run: float = float('-inf')
+    last_run = float('-inf')
 
     def decorator(function):
         def wrapper(*args, **kwargs):
@@ -54,7 +54,7 @@ def get_args():
 @run_once_per(seconds=2)
 def get(url):
     print(f"GET: {url}")
-    req = request.Request(
+    req = Request(
         url=url,
         data=None,
         headers={
@@ -63,9 +63,9 @@ def get(url):
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with request.urlopen(
-        req,
-        timeout=3,
+    with urlopen(
+            req,
+            timeout=3,
     ) as response:
         print(response.getcode())
         content = response.read().decode("utf-8")
@@ -85,7 +85,7 @@ def get_releases(repo: str, release_type: str) -> dict:
     # всегда по убыванию, т.е. как на странице релизов
 
     params = {"per_page": "50"}
-    encoded_params = urllib.parse.urlencode(params)
+    encoded_params = urlencode(params)
 
     url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
     print(f"Requesting github releases for {repo}")
@@ -104,11 +104,7 @@ def get_releases(repo: str, release_type: str) -> dict:
     return (
         all_releases
         if release_type == "all"
-        else OrderedDict(
-            (k, v)
-            for k, v in all_releases.items()
-            if not v["prerelease"]
-        )
+        else OrderedDict((k, v) for k, v in all_releases.items() if not v["prerelease"])
     )
 
 
@@ -138,15 +134,15 @@ def download(release_info: dict, home: str, repo: str):
         filepath = os.path.join(release_path, asset_name)
         print(f"Downloading {asset['name']} to {filepath}")
 
-        request.urlretrieve(url, filepath, reporthook)
+        urlretrieve(url, filepath, reporthook)
 
     tarball_path = os.path.join(release_path, "source.tar.gz")
     print(f"Downloading source tarball to {tarball_path}")
-    request.urlretrieve(release_info["tarball_url"], tarball_path, reporthook)
+    urlretrieve(release_info["tarball_url"], tarball_path, reporthook)
 
     zipball_path = os.path.join(release_path, "source.zip")
     print(f"Downloading source zipball to {zipball_path}")
-    request.urlretrieve(release_info["zipball_url"], zipball_path, reporthook)
+    urlretrieve(release_info["zipball_url"], zipball_path, reporthook)
 
     print(f"Creating release README.md file")
     with open(os.path.join(release_path, "README.md"), "w") as f:
@@ -224,15 +220,11 @@ def main():
         assert release_type in ["all", "stable"], f"Unknown release type `{release_type}` given. Use `all` or `stable`"
 
         n_releases = int(n_releases)
-        assert n_releases > 0, \
-               f"Incorrect number of releases for repo {repo}, number should be positive, `{n_releases}` given"
+        assert (
+                n_releases > 0
+        ), f"Incorrect number of releases for repo {repo}, number should be positive, `{n_releases}` given"
 
-        run(
-            home=args.home,
-            repo=repo.strip('/'),
-            n_releases=n_releases,
-            release_type=release_type
-        )
+        run(home=args.home, repo=repo.strip('/'), n_releases=n_releases, release_type=release_type)
 
         if i != len(conf) - 1:
             print(f"Sleeping for 5 seconds")
