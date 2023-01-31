@@ -10,6 +10,7 @@ import urllib.parse
 from collections import OrderedDict
 from pathlib import Path
 from urllib import request
+import re
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
 
@@ -188,7 +189,7 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
     if not local_versions:
         # no local versions, just download last `n_releases` releases from github
         print("No local releases found")
-        print(f"{n_releases} will be downloaded")
+        print(f"{n_releases} will be downloaded: {releases_to_keep.keys()}")
         for i, new in enumerate(releases_to_keep.values()):
             print(f"Processing release {i + 1}/{n_releases}. {repo}:{new['tag_name']}")
             download(release_info=new, home=home, repo=repo)
@@ -219,7 +220,7 @@ def main():
         lines = f_conf.readlines()
 
     conf = [
-        line.strip('\n').split(', ')
+        re.split(r',\s*', line.strip('\n'))
         for line in lines
     ]
 
