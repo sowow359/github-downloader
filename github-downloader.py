@@ -9,6 +9,7 @@ import shutil
 import time
 from collections import OrderedDict
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen, urlretrieve
 
@@ -52,7 +53,7 @@ def get_args():
 
 
 @run_once_per(seconds=2)
-def get(url):
+def get_as_json(url):
     print(f"GET: {url}")
     req = Request(
         url=url,
@@ -63,41 +64,49 @@ def get(url):
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    with urlopen(
-            req,
-            timeout=3,
-    ) as response:
-        print(response.getcode())
-        content = response.read().decode("utf-8")
-    return content
+    try:
+        with urlopen(
+                req,
+                timeout=3,
+        ) as response:
+            print(response.getcode())
+            content = response.read().decode("utf-8")
+            return json.loads(content)
+
+    except HTTPError as e:
+        print(f"Error: {e.code} {e.msg}")
 
 
 def get_latest(repo: str):
     print(f"Requesting latest release for {repo}")
     url = f"{GITHUB_API_BASE_URL}/{repo}/releases/latest"
-    js = json.loads(get(url))
-    js["tag_name"] = js["tag_name"].replace('/', '_')
-    return js
+    js = get_as_json(url)
+    if js:
+        js["tag_name"] = js["tag_name"].replace('/', '_')
+        return js
 
 
 def get_releases(repo: str, release_type: str) -> dict:
     # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
     # всегда по убыванию, т.е. как на странице релизов
 
+    all_releases = OrderedDict()
+    latest = get_latest(repo)
+
+    if not latest:
+        return {}
+
+    # always keep one tagged with `latest` first
+    all_releases[latest["tag_name"]] = latest
+
     params = {"per_page": "50"}
     encoded_params = urlencode(params)
 
     url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
     print(f"Requesting github releases for {repo}")
-    content = get(url)
+    content = get_as_json(url)
 
-    all_releases = OrderedDict()
-
-    # always keep one tagged with `latest`
-    latest = get_latest(repo)
-    all_releases[latest["tag_name"]] = latest
-
-    for release in json.loads(content):
+    for release in content:
         release["tag_name"] = release["tag_name"].replace('/', '_')
         all_releases[release["tag_name"]] = release
 
@@ -171,6 +180,10 @@ def drop(home: str, repo: str, version: str):
 
 def run(home: str, repo: str, n_releases: int, release_type: str):
     github_releases = get_releases(repo=repo, release_type=release_type)
+    if not github_releases:
+        print(f"No github releases found, skipping {repo}")
+        return
+
     while len(github_releases) > n_releases:
         github_releases.popitem()
     releases_to_keep = github_releases
