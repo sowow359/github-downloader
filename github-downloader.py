@@ -52,7 +52,7 @@ def get_args():
     return parser.parse_args()
 
 
-@run_once_per(seconds=2)
+@run_once_per(seconds=5)
 def get_as_json(url):
     print(f"GET: {url}")
     req = Request(
