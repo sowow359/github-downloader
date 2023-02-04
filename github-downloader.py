@@ -61,10 +61,12 @@ def get_args():
     parser = argparse.ArgumentParser(prog="Github downloader")
     parser.add_argument("--home-folder", action="store", type=str, required=True, dest="home")
     parser.add_argument("--config", action="store", type=str, required=True, dest="config_file_path")
+    parser.add_argument(
+        "--sleep-between-repos", action="store", type=int, required=False, dest="sleep_between_repos", default=5
+    )
     return parser.parse_args()
 
 
-# TODO configure interval via config
 @run_once_per(seconds=5)
 def get_as_json(url):
     print(f"GET: {url}")
@@ -289,8 +291,8 @@ def main():
         run(home=args.home, repo=repo.strip('/'), n_releases=n_releases, release_type=release_type)
 
         if i != len(conf) - 1:
-            print(f"Sleeping for 5 seconds")
-            time.sleep(5)
+            print(f"Sleeping for {args.sleep_between_repos} seconds")
+            time.sleep(args.sleep_between_repos)
 
 
 if __name__ == '__main__':

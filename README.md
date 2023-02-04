@@ -8,11 +8,12 @@ No need for github token.
 ### Usage
 
 ```
-./github-downloader.py --home-folder ~/github/ --config github.conf
+./github-downloader.py --home-folder ~/github/ --config github.conf [--sleep-between-repos N]
 ```
 
-* `home-folder` - where to stash releases with assets.
+* `home-folder` - where to stash releases with assets
 * `config` - see below
+* `sleep-between-repos` - how many seconds to sleep between repos, 5 by default
 
 #### Config
 
