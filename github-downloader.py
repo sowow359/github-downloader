@@ -9,11 +9,23 @@ import shutil
 import time
 from collections import OrderedDict
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, ContentTooShortError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen, urlretrieve
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
+
+
+class BaseError(Exception):
+    def __init__(self, message: str):
+        self.message = message
+
+    def __str__(self):
+        return f"{self.__class__.__name__}: {self.message}"
+
+
+class DownloadError(BaseError):
+    pass
 
 
 def run_once_per(seconds):
@@ -52,6 +64,7 @@ def get_args():
     return parser.parse_args()
 
 
+# TODO configure interval via config
 @run_once_per(seconds=5)
 def get_as_json(url):
     print(f"GET: {url}")
@@ -60,54 +73,57 @@ def get_as_json(url):
         data=None,
         headers={
             "Accept": "application/vnd.github+json",
-            # "Authorization": "Bearer <YOUR-TOKEN>",
+            # "Authorization": "Bearer <YOUR-TOKEN>",  # TODO pass with bcrypt
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
-    try:
-        with urlopen(
-                req,
-                timeout=3,
-        ) as response:
-            print(response.getcode())
-            content = response.read().decode("utf-8")
-            return json.loads(content)
-
-    except HTTPError as e:
-        print(f"Error: {e.code} {e.msg}")
+    with urlopen(
+            req,
+            timeout=3,
+    ) as response:
+        content = response.read().decode("utf-8")
+        return json.loads(content)
 
 
 def get_latest(repo: str):
-    print(f"Requesting latest release for {repo}")
-    url = f"{GITHUB_API_BASE_URL}/{repo}/releases/latest"
-    js = get_as_json(url)
-    if js:
-        js["tag_name"] = js["tag_name"].replace('/', '_')
-        return js
+    try:
+        latest = get_as_json(f"{GITHUB_API_BASE_URL}/{repo}/releases/latest")
+    except HTTPError as e:
+        if e.code == 404:
+            # no releases
+            return {}
+        else:
+            raise e
+
+    latest["tag_name"] = latest["tag_name"].replace('/', '_')
+    return latest
+
+
+def get_last_n_releases(repo: str, n: int = 50):
+    params = {"per_page": n}
+    encoded_params = urlencode(params)
+
+    releases = get_as_json(f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}")
+
+    for release in releases:
+        release["tag_name"] = release["tag_name"].replace('/', '_')
+    return releases
 
 
 def get_releases(repo: str, release_type: str) -> dict:
     # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
-    # всегда по убыванию, т.е. как на странице релизов
 
     all_releases = OrderedDict()
-    latest = get_latest(repo)
 
-    if not latest:
+    latest_release = get_latest(repo)
+    if not latest_release:
+        # no latest release -> no releases
         return {}
-
     # always keep one tagged with `latest` first
-    all_releases[latest["tag_name"]] = latest
+    all_releases[latest_release["tag_name"]] = latest_release
 
-    params = {"per_page": "50"}
-    encoded_params = urlencode(params)
-
-    url = f"{GITHUB_API_BASE_URL}/{repo}/releases?{encoded_params}"
-    print(f"Requesting github releases for {repo}")
-    content = get_as_json(url)
-
-    for release in content:
-        release["tag_name"] = release["tag_name"].replace('/', '_')
+    last_n = get_last_n_releases(repo)
+    for release in last_n:
         all_releases[release["tag_name"]] = release
 
     return (
@@ -121,8 +137,6 @@ def get_local_versions(home: str, repo: str):
     print(f"Listing existing local versions")
     repo_dir = os.path.join(home, repo)
     if not os.path.exists(repo_dir):
-        print(f"Repo folder does not exists, creating {repo_dir}")
-        Path(repo_dir).mkdir(parents=True, exist_ok=True)
         return []
 
     versions = os.listdir(repo_dir)
@@ -130,10 +144,45 @@ def get_local_versions(home: str, repo: str):
     return list(sorted(versions, reverse=True))
 
 
+@run_once_per(seconds=5)
+def download_file(url: str, to: str):
+    n_retries = 3
+    for i in range(n_retries):
+        try:
+            urlretrieve(url, to, reporthook)
+            return
+        except ContentTooShortError as e:
+            print(f"Error: {e}")
+            if os.path.exists(to):
+                os.remove(to)
+
+        if i != n_retries - 1:
+            print(f"Attempt {i + 1}/{n_retries}")
+
+    raise DownloadError(f"Error downloading {url}")
+
+
 def download(release_info: dict, home: str, repo: str):
     release_path = os.path.join(home, repo, release_info["tag_name"])
+    try:
+        _download_release(release_info=release_info, release_path=release_path)
+        return
+    except DownloadError as de:
+        print(f"Failed to download release due to network error: {de}")
+    except KeyboardInterrupt:
+        print()
+        print(f"Interrupted")
+    except Exception as ex:
+        print(f"Unexpected error: {ex}")
+
+    print(f"Cleaning up: removing {release_path}")
+    shutil.rmtree(release_path)
+    exit(1)
+
+
+def _download_release(release_info: dict, release_path: str):
     if not os.path.exists(release_path):
-        os.mkdir(release_path)
+        Path(release_path).mkdir(parents=True)
         print(f"Created release dir {release_path}")
 
     for asset in release_info["assets"]:
@@ -142,16 +191,15 @@ def download(release_info: dict, home: str, repo: str):
 
         filepath = os.path.join(release_path, asset_name)
         print(f"Downloading {asset['name']} to {filepath}")
-
-        urlretrieve(url, filepath, reporthook)
+        download_file(url, filepath)
 
     tarball_path = os.path.join(release_path, "source.tar.gz")
     print(f"Downloading source tarball to {tarball_path}")
-    urlretrieve(release_info["tarball_url"], tarball_path, reporthook)
+    download_file(release_info["tarball_url"], tarball_path)
 
     zipball_path = os.path.join(release_path, "source.zip")
     print(f"Downloading source zipball to {zipball_path}")
-    urlretrieve(release_info["zipball_url"], zipball_path, reporthook)
+    download_file(release_info["zipball_url"], zipball_path)
 
     print(f"Creating release README.md file")
     with open(os.path.join(release_path, "README.md"), "w") as f:
@@ -173,13 +221,14 @@ def download(release_info: dict, home: str, repo: str):
         f.write(release_info["body"])
 
 
-def drop(home: str, repo: str, version: str):
-    release_path = os.path.join(home, repo, version)
-    shutil.rmtree(release_path)
-
-
 def run(home: str, repo: str, n_releases: int, release_type: str):
-    github_releases = get_releases(repo=repo, release_type=release_type)
+    try:
+        github_releases = get_releases(repo=repo, release_type=release_type)
+    except HTTPError as he:
+        print(f"Error getting releases for {repo}: {he}")
+        print("Exiting")
+        exit(1)
+
     if not github_releases:
         print(f"No github releases found, skipping {repo}")
         return
@@ -193,7 +242,6 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
     local_versions = set(get_local_versions(home=home, repo=repo))
     if not local_versions:
         # no local versions, just download last `n_releases` releases from github
-        print("No local releases found")
         print(f"{n_releases} will be downloaded: {releases_to_keep.keys()}")
         for i, new in enumerate(releases_to_keep.values()):
             print(f"Processing release {i + 1}/{n_releases}. {repo}:{new['tag_name']}")
@@ -214,7 +262,8 @@ def run(home: str, repo: str, n_releases: int, release_type: str):
 
     for version in versions_to_delete:
         print(f"Removing {repo}: {version}")
-        drop(home=home, repo=repo, version=version)
+        release_path = os.path.join(home, repo, version)
+        shutil.rmtree(release_path)
 
     print("Done")
 
