@@ -59,10 +59,31 @@ def reporthook(block_num, block_size, total_size):
 
 def get_args():
     parser = argparse.ArgumentParser(prog="Github downloader")
-    parser.add_argument("--home-folder", action="store", type=str, required=True, dest="home")
-    parser.add_argument("--config", action="store", type=str, required=True, dest="config_file_path")
     parser.add_argument(
-        "--sleep-between-repos", action="store", type=int, required=False, dest="sleep_between_repos", default=5
+        "--home-folder",
+        action="store",
+        type=str,
+        required=True,
+        dest="home",
+        help="Directory for downloading releases",
+    )
+    parser.add_argument(
+        "--config",
+        action="store",
+        type=str,
+        required=True,
+        dest="config_file_path",
+        help="Config filename/path. Consists of lines `{repo}, {release_number}, {release_type}`. "
+             "See https://github.com/sowow359/github-downloader#config for more info"
+    )
+    parser.add_argument(
+        "--sleep-between-repos",
+        action="store",
+        type=int,
+        required=False,
+        dest="sleep_between_repos",
+        default=5,
+        help="How many seconds must pass between repo processing, 5 by default"
     )
     return parser.parse_args()
 
