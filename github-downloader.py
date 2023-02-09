@@ -6,12 +6,16 @@ import json
 import os
 import re
 import shutil
+import socket
+import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
 from urllib.error import HTTPError, ContentTooShortError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen, urlretrieve
+
+socket.setdefaulttimeout(10)
 
 GITHUB_API_BASE_URL = "https://api.github.com/repos"
 
@@ -51,10 +55,25 @@ def run_once_per(seconds):
     return decorator
 
 
-def reporthook(block_num, block_size, total_size):
-    downloaded = block_num * block_size
-    if downloaded < total_size:
-        print(int(downloaded / total_size * 100), '%', end="\r", sep='')
+def reporthook(count, block_size, total_size):
+    global start_time
+    if count == 0:
+        start_time = time.time()
+        return
+    duration = time.time() - start_time
+    progress_size = int(count * block_size)
+    speed = int(progress_size / (1024 * 1024 * duration))
+
+    percent = int(count * block_size * 100 / total_size) if total_size else '...'
+
+    print(
+        f"\r{percent}%, "
+        f"{progress_size / (1024 * 1024):.2f} MB, "
+        f"{speed:.1f} MB/s, "
+        f"{duration:.1f} seconds passed",
+        end=''
+    )
+    sys.stdout.flush()
 
 
 def get_args():
@@ -102,7 +121,6 @@ def get_as_json(url):
     )
     with urlopen(
             req,
-            timeout=3,
     ) as response:
         content = response.read().decode("utf-8")
         return json.loads(content)
@@ -167,17 +185,22 @@ def get_local_versions(home: str, repo: str):
     return list(sorted(versions, reverse=True))
 
 
-@run_once_per(seconds=5)
+@run_once_per(seconds=1)
 def download_file(url: str, to: str):
+    def cleanup(path):
+        print(f"Cleaning up {path}")
+        if os.path.exists(path):
+            os.remove(path)
+
     n_retries = 3
     for i in range(n_retries):
         try:
             urlretrieve(url, to, reporthook)
+            print()
             return
-        except ContentTooShortError as e:
-            print(f"Error: {e}")
-            if os.path.exists(to):
-                os.remove(to)
+        except (ContentTooShortError, TimeoutError) as e:
+            print(f"\nError: {e}")
+        cleanup(to)
 
         if i != n_retries - 1:
             print(f"Attempt {i + 1}/{n_retries}")
@@ -193,10 +216,9 @@ def download(release_info: dict, home: str, repo: str):
     except DownloadError as de:
         print(f"Failed to download release due to network error: {de}")
     except KeyboardInterrupt:
-        print()
-        print(f"Interrupted")
+        print(f"\nInterrupted")
     except Exception as ex:
-        print(f"Unexpected error: {ex}")
+        print(f"Unexpected error: {ex.__class__.__name__}: {ex}")
 
     print(f"Cleaning up: removing {release_path}")
     shutil.rmtree(release_path)
