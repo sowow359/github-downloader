@@ -126,7 +126,7 @@ def reporthook(count, block_size, total_size):
     downloaded = int(count * block_size)
     speed = int(downloaded / (1024 * 1024 * duration))
 
-    percent = int(count * block_size * 100 / total_size) if total_size >= 0 else '...'
+    percent = min(int(count * block_size * 100 / total_size), 100) if total_size >= 0 else '...'
 
     print(
         f"\r{percent}%, "
@@ -247,7 +247,7 @@ def get_local_versions(home: str, repo: str) -> List[str]:
     return list(sorted(versions, reverse=True))
 
 
-@run_once_per(seconds=1)
+@run_once_per(seconds=3)
 def download_file(url: str, to: str):
     def cleanup(path):
         print(f"Cleaning up {path}")
