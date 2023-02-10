@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import socket
 import sys
 import time
@@ -249,14 +250,27 @@ def download_file(url: str, to: str):
         if os.path.exists(path):
             os.remove(path)
 
+    def sigterm_handler(_signo, _stack_frame):
+        print("\nReceived SIGTERM while downloading file")
+        cleanup(to)
+        raise OSError("Received SIGTERM")
+
+    def empty_handler(_signo, _stack_frame):
+        raise OSError("\nReceived SIGTERM")
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
     n_retries = 3
     for i in range(n_retries):
         try:
+            signal.signal(signal.SIGTERM, sigterm_handler)
             urlretrieve(url, to, reporthook)
+            signal.signal(signal.SIGTERM, empty_handler)
             print()
             return
         except (ContentTooShortError, TimeoutError) as e:
             print(f"\nError: {e}")
+
         cleanup(to)
 
         if i != n_retries - 1:
@@ -276,7 +290,6 @@ def download(release_info: ReleaseInfo, home: str, repo: str):
         print(f"\nInterrupted")
     except Exception as ex:
         print(f"Unexpected error: {ex.__class__.__name__}: {ex}")
-
     exit(1)
 
 
