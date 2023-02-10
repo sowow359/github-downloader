@@ -9,7 +9,6 @@ import shutil
 import socket
 import sys
 import time
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -216,14 +215,10 @@ def get_last_n_releases(repo: str, n: int = 50) -> List[ReleaseInfo]:
 def get_releases(repo: str, release_type: str) -> List[ReleaseInfo]:
     # https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases
 
-    all_releases = OrderedDict()
-
     latest_release = get_latest(repo)
     if not latest_release:
         # no latest release -> no releases
         return []
-    # always keep one tagged with `latest` first
-    all_releases[latest_release.tag] = latest_release
 
     last_n: list[ReleaseInfo] = get_last_n_releases(repo)
 
@@ -397,6 +392,7 @@ def main():
         re.split(r',\s*', line.strip('\n'))
         for line in lines
     ]
+    conf = list(filter(lambda x: len(x) == 3, conf))
 
     for i, (repo, n_releases, release_type) in enumerate(conf):
         assert release_type in ["all", "stable"], f"Unknown release type `{release_type}` given. Use `all` or `stable`"
