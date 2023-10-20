@@ -70,7 +70,7 @@ class ReleaseInfo:
                 
                 # Release notes
         """
-        ) + d.get("body") or "No release notes were provided by developers"
+        ) + (d.get("body") or "No release notes were provided by developers")
         return cls(
             tag=d["tag_name"].replace('/', '_'),
             assets=assets,
